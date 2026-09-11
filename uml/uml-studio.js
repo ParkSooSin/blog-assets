@@ -9,7 +9,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.3';
   var MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
   var CM_BASE = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.18/';
   var PU_URL = 'https://www.plantuml.com/plantuml';
@@ -118,17 +118,16 @@
     '#buml-app .bu-brand .bu-sub{font-weight:400;color:var(--bu-dim);font-size:12px;margin-left:6px;}',
     '#buml-app .bu-title{flex:1;min-width:60px;}',
     '#buml-app .bu-title input{width:100%;border:1px solid transparent;background:transparent;',
-    '  padding:5px 8px;border-radius:4px;font-size:14px;}',
+    '  height:32px;padding:0 8px;border-radius:4px;font-size:14px;}',
     '#buml-app .bu-title input:hover{border-color:var(--bu-line2);}',
     '#buml-app .bu-title input:focus{outline:none;border-color:var(--bu-ink);background:#fff;}',
     '#buml-app .bu-status{font-size:12px;color:var(--bu-dim);white-space:nowrap;}',
     '#buml-app .bu-lang{border:1px solid var(--bu-line);background:#fff;border-radius:4px;',
-    '  padding:4px 6px;font-size:12px;color:var(--bu-text);flex:0 0 auto;}',
-    '#buml-app .bu-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--bu-line);',
-    '  background:#fff;border-radius:4px;padding:5px 10px;font-size:13px;white-space:nowrap;}',
+    '  height:32px;padding:0 8px;font-size:13px;color:var(--bu-text);flex:0 0 auto;}', /* 상단바 컨트롤 높이 전부 32px 통일(형 지적: 위쪽 틀어짐) */
+    '#buml-app .bu-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid var(--bu-line);',
+    '  background:#fff;border-radius:4px;height:32px;padding:0 10px;font-size:13px;white-space:nowrap;}',
     '#buml-app .bu-btn:hover{border-color:var(--bu-ink);color:var(--bu-ink);}',
-    '#buml-app .bu-btn.bu-primary{background:var(--bu-ink);border-color:var(--bu-ink);color:#fff;}',
-    '#buml-app .bu-btn.bu-primary:hover{opacity:.88;color:#fff;}',
+    '#buml-app .bu-btn.bu-primary{color:var(--bu-ink);font-weight:600;}', /* 형 지적: 솔리드 그린이 혼자 튀고 라운드가 달라 보임 — 다른 버튼과 같은 흰 배경으로 통일, 글자만 잉크색 */
     '#buml-app .bu-iconbtn{border:1px solid var(--bu-line);background:#fff;border-radius:4px;',
     '  width:30px;height:28px;display:none;align-items:center;justify-content:center;font-size:14px;}',
     '#buml-app .buml-body{flex:1;display:flex;min-height:0;position:relative;}',
@@ -198,11 +197,13 @@
     '  #buml-app .buml{height:clamp(460px,calc(100vh - 200px),900px);min-height:0;}', /* 모바일은 기존 고정 높이 유지(탭 전환) */
     '  #buml-app .bu-menu{display:inline-flex;}',
     '  #buml-app .bu-brand .bu-sub{display:none;}',
-    '  #buml-app .bu-brand{font-size:13px;}',
-    '  #buml-app .bu-lang{font-size:11px;padding:3px 4px;}',
+    '  #buml-app .bu-brand{display:none;}', /* 모바일: 브랜드 대신 제목칸에 폭을 준다(제목칸이 유일한 이름변경 경로 — 자모 잘림 방지. 페이지 제목이 정체성을 대신함) */
+    '  #buml-app .bu-title input{font-size:12px;}',
+    '  #buml-app .bu-lang{font-size:11px;padding:0 5px;}', /* 모바일도 세로 패딩 없음 — 높이 32px 유지(형 지적: 틀어짐) */
+    '  #buml-app .bu-title{min-width:0;}', /* 모바일: 제목칸 min-width 60px 때문에 +버튼이 카드 밖으로 밀려 잘렸다(문서 overflow는 0 — 위젯이 내부 클립) */
     '  #buml-app .bu-status{display:none;}',
     '  #buml-app .buml-top .bu-btn .bu-btxt{display:none;}',
-    '  #buml-app .buml-top .bu-btn{padding:5px 8px;}',
+    '  #buml-app .buml-top .bu-btn{padding:0 8px;}',
     '  #buml-app .bu-side{position:absolute;top:0;left:0;bottom:0;width:min(280px,78%);z-index:6;',
     '    background:#fbfbf9;transform:translateX(-100%);transition:transform .18s ease;box-shadow:none;}',
     '  #buml-app .buml.side-open .bu-side{transform:none;box-shadow:2px 0 14px rgba(0,0,0,.18);}',
