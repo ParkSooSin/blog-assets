@@ -111,7 +111,7 @@
     '#buml-app button,#buml-app input,#buml-app textarea{font:inherit;color:inherit;margin:0;}',
     '#buml-app button{cursor:pointer;background:none;border:none;padding:0;}',
     '#buml-app .buml{border:1px solid var(--bu-line);background:var(--bu-bg);border-radius:6px;overflow:hidden;',
-    '  height:clamp(560px,calc(100vh - 260px),1080px);display:flex;flex-direction:column;}', /* 세로 스택이라 상한 상향 */
+    '  min-height:clamp(560px,calc(100vh - 260px),1080px);height:auto;display:flex;flex-direction:column;}', /* 렌더가 길면 위젯 전체가 세로로 늘어난다(형 요청) — height 고정이 렌더 잘림의 원인 */
     '#buml-app .buml-top{display:flex;align-items:center;gap:8px;padding:8px 12px;',
     '  background:var(--bu-bar);border-bottom:1px solid var(--bu-line);flex:0 0 auto;}',
     '#buml-app .bu-brand{font-weight:700;font-size:15px;letter-spacing:.02em;white-space:nowrap;}',
@@ -156,7 +156,7 @@
     '#buml-app .bu-viewtabs button{flex:1;padding:7px 0;font-size:13px;color:var(--bu-dim);}',
     '#buml-app .bu-viewtabs button.on{color:var(--bu-ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--bu-ink);}',
     '#buml-app .bu-panes{flex:1;display:flex;flex-direction:column;min-height:0;}', /* 세로 스택: 코드 위 · 렌더 아래(형 요청, 렌더를 크게) */
-    '#buml-app .bu-pane-src{flex:0 0 40%;display:flex;min-width:0;min-height:0;border-bottom:1px solid var(--bu-line);}',
+    '#buml-app .bu-pane-src{flex:0 0 auto;height:clamp(200px,32vh,420px);display:flex;min-width:0;min-height:0;border-bottom:1px solid var(--bu-line);}', /* 코드창은 고정 높이(내부 CodeMirror 스크롤) — 위젯이 auto 높이라 % basis는 불안정 */
     '#buml-app .bu-src,#buml-app .bu-pane-src .CodeMirror{flex:1;width:100%;border:none;outline:none;padding:12px;',
     '  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;',
     '  font-size:13px;line-height:1.55;color:var(--bu-text);background:#fff;tab-size:2;}',
@@ -177,14 +177,16 @@
     '#buml-app .bu-pane-src .cm-variable-2{color:#5d5f9c;}',
     '#buml-app .bu-pane-src .CodeMirror-empty{color:var(--bu-dim);}',
     '#buml-app .bu-pane-src .CodeMirror-empty::before{color:var(--bu-dim);}',
-    '#buml-app .bu-pane-prev{flex:1;display:flex;flex-direction:column;min-width:0;}',
+    '#buml-app .bu-pane-prev{flex:1;display:flex;flex-direction:column;min-width:0;min-height:340px;}', /* 렌더 최소 높이 보장, 그 이상은 콘텐츠만큼 */
     '#buml-app .bu-prevbar{flex:0 0 auto;display:flex;gap:6px;align-items:center;padding:7px 10px;',
     '  border-bottom:1px solid var(--bu-line2);background:#fbfbf9;}',
     '#buml-app .bu-prevbar .bu-btn{padding:3px 8px;font-size:12px;}',
-    '#buml-app .bu-stage{flex:1;overflow:auto;padding:16px;min-height:0;display:flex;',
-    '  align-items:flex-start;justify-content:center;}',
-    /* PlantUML SVG는 preserveAspectRatio="none" + 인라인 px라 !important로 비율 보정 */
-    '#buml-app .bu-stage svg{max-width:100%;height:auto !important;}',
+    '#buml-app .bu-stage{overflow-x:auto;padding:16px;display:flex;align-items:flex-start;}', /* 세로는 콘텐츠만큼(부모가 함께 늘어남), 가로만 스크롤(형 요청). justify-content:center는 넘칠 때 양쪽이 잘리고 왼쪽 끝은 스크롤로도 도달 불가 */
+    /* PlantUML SVG는 preserveAspectRatio="none" + 인라인 px라 !important로 비율 보정.
+       가로는 원본 크기 유지 — 넘치면 stage 가로 스크롤(형 요청, 축소하지 않는다) */
+    '#buml-app .bu-stage svg{max-width:none;height:auto !important;flex:0 0 auto;margin:0 auto;}', /* flex-shrink:1 기본값이 svg를 컨테이너 폭으로 눌렀다. margin auto=남는 폭만 가운데(넘칠 땐 0) */
+    '#buml-app .bu-stage::-webkit-scrollbar{height:8px;}',
+    '#buml-app .bu-stage::-webkit-scrollbar-thumb{background:var(--bu-line2);border-radius:4px;}', /* 가로 스크롤 존재가 보이게(형 요청) */
     '#buml-app .bu-stage .bu-ph{color:var(--bu-dim);font-size:13px;text-align:center;margin:auto;line-height:2;}',
     '#buml-app .bu-error{margin:12px;border:1px solid #e3c3bf;background:#faf3f2;color:#9c3f36;',
     '  border-radius:4px;padding:10px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word;}',
@@ -193,7 +195,7 @@
     '  color:#7a6a35;font-size:12px;flex:0 0 auto;}',
     /* 모바일 */
     '@media (max-width:820px){',
-    '  #buml-app .buml{height:clamp(460px,calc(100vh - 200px),900px);}',
+    '  #buml-app .buml{height:clamp(460px,calc(100vh - 200px),900px);min-height:0;}', /* 모바일은 기존 고정 높이 유지(탭 전환) */
     '  #buml-app .bu-menu{display:inline-flex;}',
     '  #buml-app .bu-brand .bu-sub{display:none;}',
     '  #buml-app .bu-brand{font-size:13px;}',
@@ -207,8 +209,10 @@
     '  #buml-app .bu-backdrop{display:block;position:absolute;inset:0;background:rgba(0,0,0,.35);z-index:5;opacity:0;pointer-events:none;transition:opacity .18s;}',
     '  #buml-app .buml.side-open .bu-backdrop{opacity:1;pointer-events:auto;}',
     '  #buml-app .bu-viewtabs{display:flex;}',
-    '  #buml-app .bu-pane-src{border-bottom:none;}', /* 모바일은 탭 전환 — 구분선 불필요 */
+    '  #buml-app .bu-pane-src{border-bottom:none;height:auto;}', /* 모바일은 탭 전환 — 구분선·고정 높이 리셋(flex-basis:100%이 지배) */
     '  #buml-app .bu-pane-src,#buml-app .bu-pane-prev{display:none;flex-basis:100%;}',
+    '  #buml-app .bu-stage{overflow-x:hidden;overflow-y:auto;}',
+    '  #buml-app .bu-stage svg{max-width:100%;}', /* 폰은 가로 스크롤 대신 등비 축소 유지 */
     '  #buml-app .buml[data-view="src"] .bu-pane-src{display:flex;}',
     '  #buml-app .buml[data-view="prev"] .bu-pane-prev{display:flex;}',
     '  #buml-app .bu-src,#buml-app .bu-pane-src .CodeMirror{font-size:16px;}', /* iOS 포커스 줌 방지 */
@@ -408,6 +412,15 @@
       if (seq !== renderSeq) return; // 최신 입력만 반영
       lastSvg = out.svg;
       elStage.innerHTML = lastSvg;
+      /* mermaid svg는 width 속성이 없어 intrinsic 폭이 없다 → auto 가 shrink-to-fit(컨테이너 폭)이 된다.
+         viewBox 폭을 명시해 원본 크기로(형 요청: 가로는 축소 대신 stage 스크롤). 모바일은 CSS max-width:100%가 다시 축소 */
+      var ms = elStage.querySelector('svg');
+      if (ms) {
+        ms.style.width = ''; ms.removeAttribute('width');
+        ms.style.maxWidth = ''; /* mermaid 인라인 max-width(=원본 폭)가 CSS max-width:100%(모바일 축소)를 이겨버린다 */
+        var vb = (ms.getAttribute('viewBox') || '').trim().split(/[\s,]+/);
+        if (vb.length === 4 && parseFloat(vb[2]) > 0) ms.style.width = vb[2] + 'px';
+      }
     }).catch(function (e) {
       if (seq !== renderSeq) return;
       lastSvg = '';
