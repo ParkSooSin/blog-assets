@@ -2,13 +2,15 @@
  * 카곰의 얼룩덜룩 — UML 스튜디오 (클라이언트 전용)
  * - 문서는 이 브라우저(IndexedDB)에만 저장됩니다. 서버 전송 없음.
  * - 렌더: mermaid@11 (jsDelivr CDN, 브라우저에서 직접)
+ *         PlantUML (공식 서버 plantuml.com /~h hex 인코딩, CORS *)
  * - 블로그 테마 오염 방지: 모든 셀렉터·id를 #buml-app 스코프로 한정
  */
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
+  var PU_URL = 'https://www.plantuml.com/plantuml';
   var RENDER_DEBOUNCE = 500;
   var SAVE_DEBOUNCE = 700;
 
@@ -55,7 +57,7 @@
   }
 
   /* ---------- 상태 ---------- */
-  var current = null;      // {id,title,source,updated}
+  var current = null;      // {id,title,source,lang,updated} — lang: 'mermaid' | 'plantuml'
   var lastSvg = '';        // 마지막 성공 렌더 SVG 문자열
   var mermaidReady = null; // Promise<mermaid>
   var renderTimer = 0, saveTimer = 0;
@@ -74,6 +76,15 @@
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
+  }
+  function curLang() { return (current && current.lang) || 'mermaid'; }
+
+  /* ---------- PlantUML 인코딩 ---------- */
+  /* 공식 서버 ~h 헤더: UTF-8 바이트를 hex로 주면 deflate/base64 없이 그려준다 */
+  function puUrl(fmt, src) {
+    var b = new TextEncoder().encode(src), hex = '';
+    for (var i = 0; i < b.length; i++) hex += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+    return PU_URL + '/' + fmt + '/~h' + hex;
   }
 
   /* ---------- 스킨 ---------- */
@@ -97,6 +108,8 @@
     '#buml-app .bu-title input:hover{border-color:var(--bu-line2);}',
     '#buml-app .bu-title input:focus{outline:none;border-color:var(--bu-ink);background:#fff;}',
     '#buml-app .bu-status{font-size:12px;color:var(--bu-dim);white-space:nowrap;}',
+    '#buml-app .bu-lang{border:1px solid var(--bu-line);background:#fff;border-radius:4px;',
+    '  padding:4px 6px;font-size:12px;color:var(--bu-text);flex:0 0 auto;}',
     '#buml-app .bu-btn{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--bu-line);',
     '  background:#fff;border-radius:4px;padding:5px 10px;font-size:13px;white-space:nowrap;}',
     '#buml-app .bu-btn:hover{border-color:var(--bu-ink);color:var(--bu-ink);}',
@@ -139,7 +152,8 @@
     '#buml-app .bu-prevbar .bu-btn{padding:3px 8px;font-size:12px;}',
     '#buml-app .bu-stage{flex:1;overflow:auto;padding:16px;min-height:0;display:flex;',
     '  align-items:flex-start;justify-content:center;}',
-    '#buml-app .bu-stage svg{max-width:100%;height:auto;}',
+    /* PlantUML SVG는 preserveAspectRatio="none" + 인라인 px라 !important로 비율 보정 */
+    '#buml-app .bu-stage svg{max-width:100%;height:auto !important;}',
     '#buml-app .bu-stage .bu-ph{color:var(--bu-dim);font-size:13px;text-align:center;margin:auto;line-height:2;}',
     '#buml-app .bu-error{margin:12px;border:1px solid #e3c3bf;background:#faf3f2;color:#9c3f36;',
     '  border-radius:4px;padding:10px 12px;font-size:12px;white-space:pre-wrap;word-break:break-word;}',
@@ -151,6 +165,8 @@
     '  #buml-app .buml{height:clamp(460px,calc(100vh - 200px),900px);}',
     '  #buml-app .bu-menu{display:inline-flex;}',
     '  #buml-app .bu-brand .bu-sub{display:none;}',
+    '  #buml-app .bu-brand{font-size:13px;}',
+    '  #buml-app .bu-lang{font-size:11px;padding:3px 4px;}',
     '  #buml-app .bu-status{display:none;}',
     '  #buml-app .buml-top .bu-btn .bu-btxt{display:none;}',
     '  #buml-app .buml-top .bu-btn{padding:5px 8px;}',
@@ -179,19 +195,23 @@
     '  <div class="bu-banner" id="buml-banner" hidden></div>' +
     '  <div class="buml-top">' +
     '    <button class="bu-btn bu-menu" id="buml-menu" aria-label="문서 목록">☰</button>' +
-    '    <span class="bu-brand">UML 스튜디오<span class="bu-sub">mermaid · 브라우저에 저장</span></span>' +
+    '    <span class="bu-brand">UML 스튜디오<span class="bu-sub">mermaid · PlantUML · 브라우저에 저장</span></span>' +
     '    <span class="bu-title"><input id="buml-title" placeholder="무제 다이어그램" maxlength="80"></span>' +
+    '    <select class="bu-lang" id="buml-lang" title="다이어그램 문법">' +
+    '      <option value="mermaid">mermaid</option>' +
+    '      <option value="plantuml">PlantUML</option>' +
+    '    </select>' +
     '    <span class="bu-status" id="buml-status"></span>' +
     '    <button class="bu-btn" id="buml-import" title="파일 가져오기">⬆<span class="bu-btxt">가져오기</span></button>' +
     '    <button class="bu-btn bu-primary" id="buml-new">＋<span class="bu-btxt">새 문서</span></button>' +
-    '    <input type="file" id="buml-file" accept=".mmd,.mermaid,.txt" hidden multiple>' +
+    '    <input type="file" id="buml-file" accept=".mmd,.mermaid,.puml,.txt" hidden multiple>' +
     '  </div>' +
     '  <div class="buml-body">' +
     '    <div class="bu-backdrop" id="buml-backdrop"></div>' +
     '    <aside class="bu-side">' +
     '      <div class="bu-side-head">내 다이어그램</div>' +
     '      <ul class="bu-list" id="buml-list"></ul>' +
-    '      <div class="bu-side-foot">⚠️ 문서는 <b>이 브라우저에만</b> 저장됩니다.<br>기기 초기화 전에는 「mmd」 내려받기로 백업하세요.</div>' +
+    '      <div class="bu-side-foot">⚠️ 문서는 <b>이 브라우저에만</b> 저장됩니다. 기기 초기화 전에는 내려받기로 백업하세요.<br>PlantUML은 공식 서버(plantuml.com)에서 그립니다.</div>' +
     '    </aside>' +
     '    <main class="bu-main">' +
     '      <div class="bu-viewtabs">' +
@@ -218,7 +238,8 @@
   var $ = function (id) { return document.getElementById(id); };
   var shell = root.querySelector('.buml');
   var elList = $('buml-list'), elSrc = $('buml-src'), elStage = $('buml-stage'),
-      elTitle = $('buml-title'), elStatus = $('buml-status'), elBanner = $('buml-banner');
+      elTitle = $('buml-title'), elStatus = $('buml-status'), elBanner = $('buml-banner'),
+      elLang = $('buml-lang'), elMmd = $('buml-mmd');
 
   function banner(msg) {
     if (!msg) { elBanner.hidden = true; return; }
@@ -261,6 +282,7 @@
       return;
     }
     var seq = ++renderSeq;
+    if (curLang() === 'plantuml') { renderPlantUml(seq, src); return; }
     loadMermaid().then(function (mermaid) {
       return mermaid.render('buml-svg-' + Date.now(), src);
     }).then(function (out) {
@@ -275,6 +297,28 @@
     });
   }
 
+  /* PlantUML: 공식 서버에서 SVG를 받아온다. CORS 는 * 로 열려 있음.
+     문법 오류는 HTTP 200 + SVG 안 "Syntax Error" 텍스트로 온다. */
+  function renderPlantUml(seq, src) {
+    fetch(puUrl('svg', src)).then(function (r) {
+      if (!r.ok) throw new Error('렌더 실패 (' + r.status + ') — 문법을 확인하세요');
+      return r.text();
+    }).then(function (text) {
+      if (seq !== renderSeq) return;
+      if (text.indexOf('Syntax Error') >= 0) {
+        lastSvg = '';
+        elStage.innerHTML = '<div class="bu-error">⚠️ PlantUML 문법 오류입니다. 소스를 확인하세요.</div>';
+        return;
+      }
+      lastSvg = text;
+      elStage.innerHTML = lastSvg;
+    }).catch(function (e) {
+      if (seq !== renderSeq) return;
+      lastSvg = '';
+      elStage.innerHTML = '<div class="bu-error">⚠️ ' + esc((e && e.message) || String(e)) + '</div>';
+    });
+  }
+
   /* ---------- 저장 ---------- */
   function scheduleSave() {
     setStatus('…');
@@ -285,6 +329,7 @@
     if (!current) return;
     current.source = elSrc.value;
     current.title = elTitle.value.trim();
+    current.lang = elLang.value;
     current.updated = Date.now();
     dbPut(current).then(function () {
       if (!dbAvailable) return;
@@ -293,6 +338,14 @@
     });
   }
   function setStatus(s) { elStatus.textContent = s; }
+
+  /* 언어 UI를 current 에 맞춘다 (mmd 버튼 라벨 포함) */
+  function syncLang() {
+    var lang = curLang();
+    elLang.value = lang;
+    elMmd.textContent = lang === 'plantuml' ? 'puml' : 'mmd';
+    elMmd.title = lang === 'plantuml' ? 'PlantUML 소스 내려받기' : 'mermaid 소스 내려받기';
+  }
 
   /* ---------- 문서 목록 ---------- */
   function refreshList() {
@@ -325,6 +378,8 @@
       current = d;
       elTitle.value = d.title || '';
       elSrc.value = d.source || '';
+      if (!d.lang) d.lang = 'mermaid'; // 옛 문서 기본값
+      syncLang();
       lsSet('buml-last', d.id);
       closeSide();
       refreshList();
@@ -332,15 +387,24 @@
     });
   }
 
+  function starterFor(lang) {
+    return lang === 'plantuml'
+      ? '@startuml\nA -> B: 확인 요청\nactivate B\nB --> A: 응답 완료\ndeactivate B\n@enduml'
+      : 'flowchart TD\n  A[시작] --> B{계속할까?}\n  B -- 예 --> C[끝]\n  B -- 아니오 --> A';
+  }
+
   function newDoc(starter) {
+    var lang = elLang.value || 'mermaid';
     current = {
       id: uid(),
       title: '',
-      source: starter !== undefined ? starter : 'flowchart TD\n  A[시작] --> B{계속할까?}\n  B -- 예 --> C[끝]\n  B -- 아니오 --> A',
+      lang: lang,
+      source: starter !== undefined ? starter : starterFor(lang),
       updated: Date.now()
     };
     elTitle.value = current.title;
     elSrc.value = current.source;
+    syncLang();
     lsSet('buml-last', current.id);
     dbPut(current).then(refreshList);
     renderNow();
@@ -382,6 +446,17 @@
 
   function exportPng() {
     if (!lastSvg) { setStatus('먼저 렌더하세요'); return; }
+    if (curLang() === 'plantuml') {
+      setStatus('PNG 생성 중…');
+      fetch(puUrl('png', elSrc.value.trim())).then(function (r) {
+        if (!r.ok) throw new Error('서버 응답 ' + r.status);
+        return r.blob();
+      }).then(function (blob) {
+        download(docName('png'), 'image/png', blob);
+        setStatus('저장됨 ' + fmtTime(Date.now()));
+      }).catch(function () { setStatus('PNG 생성 실패'); });
+      return;
+    }
     var svg = elStage.querySelector('svg');
     if (!svg) return;
     var vb = (svg.getAttribute('viewBox') || '0 0 800 600').split(/[\s,]+/).map(Number);
@@ -436,10 +511,13 @@
     arr.forEach(function (f) {
       chain = chain.then(function () {
         return f.text().then(function (text) {
+          var lang = (/\.puml$/i.test(f.name) || /@start(uml|mindmap|gantt|salt)/i.test(text))
+            ? 'plantuml' : 'mermaid';
           var doc = {
             id: uid(),
-            title: f.name.replace(/\.(mmd|mermaid|txt)$/i, ''),
+            title: f.name.replace(/\.(mmd|mermaid|puml|txt)$/i, ''),
             source: text,
+            lang: lang,
             updated: Date.now()
           };
           lastId = doc.id;
@@ -479,6 +557,7 @@
     },
     {
       title: '예제 · ERD',
+      lang: 'mermaid',
       source: 'erDiagram\n' +
         '  CUSTOMER ||--o{ ORDER : 주문\n' +
         '  ORDER ||--|{ ORDER_ITEM : 포함\n' +
@@ -491,20 +570,54 @@
         '    int status\n' +
         '    date created\n' +
         '  }'
+    },
+    {
+      title: '예제 · PlantUML 클래스',
+      lang: 'plantuml',
+      source: '@startuml\n' +
+        'skinparam shadowing false\n' +
+        'class 주문 {\n' +
+        '  +번호: int\n' +
+        '  +상태: string\n' +
+        '  +취소()\n' +
+        '}\n' +
+        'class 주문상품 {\n' +
+        '  +수량: int\n' +
+        '}\n' +
+        'class 고객 {\n' +
+        '  +이름: string\n' +
+        '}\n' +
+        '고객 "1" --> "*" 주문 : 발주\n' +
+        '주문 "1" *--> "1..*" 주문상품 : 포함\n' +
+        '@enduml'
     }
   ];
+  function mkSampleDoc(s, i) {
+    /* updated 역순 부여 — 목록에서 mermaid 예제가 먼저 오고 PlantUML 은 맨 아래 */
+    return { id: uid(), title: s.title, lang: s.lang || 'mermaid', source: s.source, updated: Date.now() - i };
+  }
   function seedIfEmpty() {
     return dbAll().then(function (docs) {
       if (docs.length || lsGet('buml-seeded')) return;
       var first = null;
       return Promise.all(SAMPLES.map(function (s, i) {
-        var doc = { id: uid(), title: s.title, source: s.source, updated: Date.now() + i };
+        var doc = mkSampleDoc(s, i);
         first = first || doc;
         return dbPut(doc);
       })).then(function () {
         lsSet('buml-seeded', '1');
         return dbAll().then(function (all) { return all[0] ? all[0].id : null; });
       });
+    });
+  }
+  /* v1.1: PlantUML 예제를 이미 시딩된 브라우저에도 1회만 보충
+     (문서를 전부 지운 브라우저는 살려두지 않는다 — 샘플 부활 방지) */
+  function addPumlSampleOnce() {
+    if (lsGet('buml-seeded2')) return Promise.resolve();
+    return dbAll().then(function (docs) {
+      var s = docs.length ? SAMPLES.filter(function (x) { return x.lang === 'plantuml'; })[0] : null;
+      var p = s ? dbPut(mkSampleDoc(s, SAMPLES.length)) : Promise.resolve();
+      return p.then(function () { lsSet('buml-seeded2', '1'); });
     });
   }
 
@@ -533,11 +646,19 @@
   });
   $('buml-png').addEventListener('click', exportPng);
   $('buml-svgcopy').addEventListener('click', copySvg);
-  $('buml-mmd').addEventListener('click', function () {
+  elMmd.addEventListener('click', function () {
     if (!current) return;
-    download(docName('mmd'), 'text/plain', elSrc.value);
+    download(docName(curLang() === 'plantuml' ? 'puml' : 'mmd'), 'text/plain', elSrc.value);
   });
   $('buml-tab').addEventListener('click', openInTab);
+
+  elLang.addEventListener('change', function () {
+    if (!current) return;
+    current.lang = elLang.value;
+    syncLang();
+    scheduleRender();
+    scheduleSave();
+  });
 
   $('buml-menu').addEventListener('click', function () { shell.classList.toggle('side-open'); });
   $('buml-backdrop').addEventListener('click', closeSide);
@@ -561,11 +682,15 @@
     });
 
     seedIfEmpty().then(function (firstId) {
-      var last = lsGet('buml-last');
-      return dbAll().then(function (docs) {
-        if (!docs.length) { newDoc(''); return; }
-        var want = docs.some(function (d) { return d.id === last; }) ? last : (firstId || docs[0].id);
-        openDoc(want);
+      // 방금 시딩했다면 샘플이 이미 포함돼 있으므로 보충 스킵
+      var p = firstId ? Promise.resolve() : addPumlSampleOnce();
+      return p.then(function () {
+        var last = lsGet('buml-last');
+        return dbAll().then(function (docs) {
+          if (!docs.length) { newDoc(''); return; }
+          var want = docs.some(function (d) { return d.id === last; }) ? last : (firstId || docs[0].id);
+          openDoc(want);
+        });
       });
     });
   }
