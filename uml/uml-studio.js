@@ -3,13 +3,15 @@
  * - 문서는 이 브라우저(IndexedDB)에만 저장됩니다. 서버 전송 없음.
  * - 렌더: mermaid@11 (jsDelivr CDN, 브라우저에서 직접)
  *         PlantUML (공식 서버 plantuml.com /~h hex 인코딩, CORS *)
+ * - 소스 편집: CodeMirror 5 (jsDelivr CDN, 실패 시 순수 textarea 폴백)
  * - 블로그 테마 오염 방지: 모든 셀렉터·id를 #buml-app 스코프로 한정
  */
 (function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
   var MERMAID_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
+  var CM_BASE = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.18/';
   var PU_URL = 'https://www.plantuml.com/plantuml';
   var RENDER_DEBOUNCE = 500;
   var SAVE_DEBOUNCE = 700;
@@ -60,6 +62,9 @@
   var current = null;      // {id,title,source,lang,updated} — lang: 'mermaid' | 'plantuml'
   var lastSvg = '';        // 마지막 성공 렌더 SVG 문자열
   var mermaidReady = null; // Promise<mermaid>
+  var cm = null;           // CodeMirror 인스턴스 (로드 전/실패 시 null → textarea 폴백)
+  var cmReady = null;      // Promise<CodeMirror>
+  var cmQuiet = false;      // setValue 등 프로그램 변경 시 change 이벤트 무시
   var renderTimer = 0, saveTimer = 0;
 
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -78,6 +83,15 @@
     });
   }
   function curLang() { return (current && current.lang) || 'mermaid'; }
+
+  /* 소스값 접근 — CodeMirror 있으면 경유, 없으면 textarea 폴백 */
+  function srcGet() { return cm ? cm.getValue() : srcEl.value; }
+  function srcSet(v) {
+    if (cm) {
+      cmQuiet = true;
+      try { cm.setValue(v); } finally { cmQuiet = false; }
+    } else srcEl.value = v;
+  }
 
   /* ---------- PlantUML 인코딩 ---------- */
   /* 공식 서버 ~h 헤더: UTF-8 바이트를 hex로 주면 deflate/base64 없이 그려준다 */
@@ -143,9 +157,26 @@
     '#buml-app .bu-viewtabs button.on{color:var(--bu-ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--bu-ink);}',
     '#buml-app .bu-panes{flex:1;display:flex;min-height:0;}',
     '#buml-app .bu-pane-src{flex:1;display:flex;min-width:0;border-right:1px solid var(--bu-line);}',
-    '#buml-app .bu-src{flex:1;width:100%;border:none;resize:none;outline:none;padding:12px;',
+    '#buml-app .bu-src,#buml-app .bu-pane-src .CodeMirror{flex:1;width:100%;border:none;outline:none;padding:12px;',
     '  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;',
     '  font-size:13px;line-height:1.55;color:var(--bu-text);background:#fff;tab-size:2;}',
+    '#buml-app .bu-pane-src .CodeMirror{height:100%;position:relative;overflow:hidden;}', /* overflow:hidden 없으면 내부 input textarea(1000px)가 문서를 민다 */
+    '#buml-app .bu-pane-src .CodeMirror-scroll{overflow:scroll !important;margin-bottom:-50px;margin-right:-50px;padding-bottom:50px;height:100%;outline:none;position:relative;}',
+    /* CodeMirror 기본 청크(프론트 기본 CSS 대신 최소 필요분 — 테마 오염 차단) */
+    '#buml-app .bu-pane-src .CodeMirror-lines{padding:0;}',
+    '#buml-app .bu-pane-src .CodeMirror pre.CodeMirror-line,#buml-app .bu-pane-src .CodeMirror pre.CodeMirror-line-like{padding:0;border:0;}',
+    '#buml-app .bu-pane-src .CodeMirror-selected{background:#e8ebe9;}',
+    '#buml-app .bu-pane-src .CodeMirror-focused .CodeMirror-selected{background:#dde3e0;}',
+    '#buml-app .bu-pane-src .CodeMirror-cursor{border-left:1.5px solid var(--bu-text);}',
+    /* 토큰 색 — 하우스 뮤트 팔레트(원색 금지) */
+    '#buml-app .bu-pane-src .cm-meta{color:#8a8f98;font-style:italic;}',
+    '#buml-app .bu-pane-src .cm-keyword{color:#4a6f64;font-weight:600;}',
+    '#buml-app .bu-pane-src .cm-string{color:#8a6d3b;}',
+    '#buml-app .bu-pane-src .cm-operator{color:#a5654e;}',
+    '#buml-app .bu-pane-src .cm-comment{color:#a4aab0;font-style:italic;}',
+    '#buml-app .bu-pane-src .cm-variable-2{color:#5d5f9c;}',
+    '#buml-app .bu-pane-src .CodeMirror-empty{color:var(--bu-dim);}',
+    '#buml-app .bu-pane-src .CodeMirror-empty::before{color:var(--bu-dim);}',
     '#buml-app .bu-pane-prev{flex:1;display:flex;flex-direction:column;min-width:0;}',
     '#buml-app .bu-prevbar{flex:0 0 auto;display:flex;gap:6px;align-items:center;padding:7px 10px;',
     '  border-bottom:1px solid var(--bu-line2);background:#fbfbf9;}',
@@ -180,7 +211,7 @@
     '  #buml-app .bu-pane-src,#buml-app .bu-pane-prev{display:none;flex-basis:100%;}',
     '  #buml-app .buml[data-view="src"] .bu-pane-src{display:flex;}',
     '  #buml-app .buml[data-view="prev"] .bu-pane-prev{display:flex;}',
-    '  #buml-app .bu-src{font-size:16px;}', /* iOS 포커스 줌 방지 */
+    '  #buml-app .bu-src,#buml-app .bu-pane-src .CodeMirror{font-size:16px;}', /* iOS 포커스 줌 방지 */
     '  #buml-app .bu-stage{padding:10px;}',
     '}'
   ].join('\n');
@@ -219,7 +250,7 @@
     '        <button data-v="prev">미리보기</button>' +
     '      </div>' +
     '      <div class="bu-panes">' +
-    '        <div class="bu-pane-src"><textarea id="buml-src" spellcheck="false" ' +
+    '        <div class="bu-pane-src"><textarea id="buml-src" class="bu-src" spellcheck="false" ' +
     '          placeholder="flowchart TD&#10;  A[시작] --> B{분기}&#10;  B -->|예| C[끝]&#10;  B -->|아니오| A"></textarea></div>' +
     '        <div class="bu-pane-prev">' +
     '          <div class="bu-prevbar">' +
@@ -237,7 +268,8 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var shell = root.querySelector('.buml');
-  var elList = $('buml-list'), elSrc = $('buml-src'), elStage = $('buml-stage'),
+  var srcEl = $('buml-src'); // 원본 textarea (CodeMirror가 대체, 실패 시 폴백)
+  var elList = $('buml-list'), elStage = $('buml-stage'),
       elTitle = $('buml-title'), elStatus = $('buml-status'), elBanner = $('buml-banner'),
       elLang = $('buml-lang'), elMmd = $('buml-mmd');
 
@@ -266,6 +298,93 @@
     return mermaidReady;
   }
 
+  /* ---------- CodeMirror 로드 (실패 시 textarea 폴백) ---------- */
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = resolve;
+      s.onerror = function () { reject(new Error('load fail ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadCss(href) {
+    if (document.querySelector('link[href="' + href + '"]')) return;
+    var l = document.createElement('link');
+    l.rel = 'stylesheet'; l.href = href;
+    document.head.appendChild(l);
+  }
+  function defineModes(CodeMirror) {
+    /* mermaid — 화살표는 operator, [노드]{라벨}은 string, %% 주석 */
+    CodeMirror.defineSimpleMode('bumlmermaid', {
+      start: [
+        { regex: /%%.*$/, token: 'comment' },
+        { regex: /\b(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(v2)?|erDiagram|gantt|pie|mindmap|timeline|journey|gitGraph|quadrantChart|subgraph|end|direction|participant|actor|activate|deactivate|note|over|loop|par|alt|else|opt|class|style|click|linkStyle|default)\b/, token: 'keyword' },
+        { regex: /(-{2,}>|->>|-->|-\.->|==>|<-{2,}|-{3}|-{2}\|)/, token: 'operator' },
+        { regex: /[\[{(]/, token: 'string', next: 'nodelabel' },
+        { regex: /\|/, token: 'string', next: 'nodelabel' },
+        { regex: /"/, token: 'string', next: 'qstring' },
+        { regex: /"[^"]*"/, token: 'string' }
+      ],
+      nodelabel: [
+        { regex: /[\]})]/, token: 'string', next: 'start' },
+        { regex: /\|/, token: 'string', next: 'start' },
+        { regex: /./, token: 'string' }
+      ],
+      qstring: [
+        { regex: /"/, token: 'string', next: 'start' },
+        { regex: /./, token: 'string' }
+      ],
+      meta: {}
+    });
+    /* PlantUML — @start/end meta, ' 주석, 키워드, 화살표 */
+    CodeMirror.defineSimpleMode('bumlpuml', {
+      start: [
+        { regex: /@start\w*|@end\w*/, token: 'meta' },
+        { regex: /'.*$/, token: 'comment' },
+        { regex: /"/, token: 'string', next: 'qstring' },
+        { regex: /\b(participant|actor|usecase|usecaseactor|boundary|control|entity|database|collections|queue|interface|enum|class|abstract|annotation|state|object|component|package|node|folder|frame|cloud|database|artifact|storage|rectangle|circle|diamond|note|title|caption|header|footer|legend|skinparam|skin|hide|show|start|stop|if|else|elseif|endif|else|switch|case|endswitch|while|endwhile|repeat|fork|forkagain|split|splitagain|endfork|endsplit|backward|kill|detach|autonumber|activate|deactivate|newpage|group|end|ref|return|label|is|goto|allowsplay|archimate|mindmap|gantt|salt|wbs|wire|monkey|yaml|json|creole|dot|math|latex|clock|chrono|timing|files|footer|mute|spin|rotation|scale|rotate|mainframe|allowsplayout|as|of|to|over|order|create|destroy|delay|duration)\b/, token: 'keyword' },
+        { regex: /(-?-{2,}>|<-{2,}?|-*\*-*|-*o-*>?|-\.->|-d+->|==>|--\||:\||=>?)/, token: 'operator' },
+        { regex: /:/, token: 'operator' }
+      ],
+      qstring: [
+        { regex: /"/, token: 'string', next: 'start' },
+        { regex: /./, token: 'string' }
+      ],
+      meta: {}
+    });
+  }
+  function loadCm() {
+    if (cmReady) return cmReady;
+    /* 순차 로드 필수 — 애드온이 코어보다 먼저 실행되면 CodeMirror is not defined (병렬은 레이스) */
+    cmReady = loadScript(CM_BASE + 'lib/codemirror.min.js')
+      .then(function () { return loadScript(CM_BASE + 'addon/mode/simple.min.js'); })
+      .then(function () { return loadScript(CM_BASE + 'addon/display/placeholder.min.js'); })
+      .then(function () {
+      loadCss(CM_BASE + 'lib/codemirror.min.css');
+      defineModes(CodeMirror);
+      cm = CodeMirror.fromTextArea(srcEl, {
+        mode: curLang() === 'plantuml' ? 'bumlpuml' : 'bumlmermaid',
+        lineWrapping: true,
+        indentUnit: 2,
+        tabSize: 2,
+        placeholder: srcEl.getAttribute('placeholder') || '',
+        extraKeys: { /* Tab은 기존 동작 유지: 들여쓰기 2칸 */
+          'Tab': function (ed) { ed.replaceSelection('  '); }
+        }
+      });
+      cm.on('change', function () {
+        if (cmQuiet) return;
+        scheduleRender(); scheduleSave();
+      });
+      srcEl.style.display = 'none'; /* 원본 textarea는 fromTextArea 가 숨기지 않는다 — 폴백 시엔 안 숨겨짐 */
+      return cm;
+    }).catch(function (e) {
+      cmReady = null; /* 다음 호출에서 재시도 */
+      if (window.console && console.warn) console.warn('CodeMirror 로드 실패, textarea 폴백', e);
+    });
+    return cmReady;
+  }
+
   /* ---------- 렌더 ---------- */
   function scheduleRender() {
     clearTimeout(renderTimer);
@@ -274,7 +393,7 @@
 
   var renderSeq = 0;
   function renderNow() {
-    var src = elSrc.value.trim();
+    var src = srcGet().trim();
     if (!current) return;
     if (!src) {
       lastSvg = '';
@@ -327,7 +446,7 @@
   }
   function saveNow() {
     if (!current) return;
-    current.source = elSrc.value;
+    current.source = srcGet();
     current.title = elTitle.value.trim();
     current.lang = elLang.value;
     current.updated = Date.now();
@@ -345,6 +464,7 @@
     elLang.value = lang;
     elMmd.textContent = lang === 'plantuml' ? 'puml' : 'mmd';
     elMmd.title = lang === 'plantuml' ? 'PlantUML 소스 내려받기' : 'mermaid 소스 내려받기';
+    if (cm) cm.setOption('mode', lang === 'plantuml' ? 'bumlpuml' : 'bumlmermaid');
   }
 
   /* ---------- 문서 목록 ---------- */
@@ -377,7 +497,7 @@
       if (!d) return;
       current = d;
       elTitle.value = d.title || '';
-      elSrc.value = d.source || '';
+      srcSet(d.source || '');
       if (!d.lang) d.lang = 'mermaid'; // 옛 문서 기본값
       syncLang();
       lsSet('buml-last', d.id);
@@ -403,7 +523,7 @@
       updated: Date.now()
     };
     elTitle.value = current.title;
-    elSrc.value = current.source;
+    srcSet(current.source);
     syncLang();
     lsSet('buml-last', current.id);
     dbPut(current).then(refreshList);
@@ -421,7 +541,7 @@
         if (current && current.id === id) {
           return dbAll().then(function (rest) {
             if (rest.length) openDoc(rest[0].id);
-            else { current = null; elTitle.value = ''; elSrc.value = ''; elStage.innerHTML = '<div class="bu-ph">좌측 ＋ 새 문서로 시작하세요</div>'; lastSvg = ''; refreshList(); }
+            else { current = null; elTitle.value = ''; srcSet(''); elStage.innerHTML = '<div class="bu-ph">좌측 ＋ 새 문서로 시작하세요</div>'; lastSvg = ''; refreshList(); }
           });
         }
         refreshList();
@@ -448,7 +568,7 @@
     if (!lastSvg) { setStatus('먼저 렌더하세요'); return; }
     if (curLang() === 'plantuml') {
       setStatus('PNG 생성 중…');
-      fetch(puUrl('png', elSrc.value.trim())).then(function (r) {
+      fetch(puUrl('png', srcGet().trim())).then(function (r) {
         if (!r.ok) throw new Error('서버 응답 ' + r.status);
         return r.blob();
       }).then(function (blob) {
@@ -625,15 +745,15 @@
   function closeSide() { shell.classList.remove('side-open'); }
 
   /* ---------- 이벤트 ---------- */
-  elSrc.addEventListener('input', function () { scheduleRender(); scheduleSave(); });
+  srcEl.addEventListener('input', function () { scheduleRender(); scheduleSave(); });
   elTitle.addEventListener('input', scheduleSave);
 
-  elSrc.addEventListener('keydown', function (e) {
+  srcEl.addEventListener('keydown', function (e) {
     if (e.key === 'Tab') {
       e.preventDefault();
-      var s = elSrc.selectionStart, en = elSrc.selectionEnd;
-      elSrc.value = elSrc.value.slice(0, s) + '  ' + elSrc.value.slice(en);
-      elSrc.selectionStart = elSrc.selectionEnd = s + 2;
+      var s = srcEl.selectionStart, en = srcEl.selectionEnd;
+      srcEl.value = srcEl.value.slice(0, s) + '  ' + srcEl.value.slice(en);
+      srcEl.selectionStart = srcEl.selectionEnd = s + 2;
       scheduleRender(); scheduleSave();
     }
   });
@@ -648,7 +768,7 @@
   $('buml-svgcopy').addEventListener('click', copySvg);
   elMmd.addEventListener('click', function () {
     if (!current) return;
-    download(docName(curLang() === 'plantuml' ? 'puml' : 'mmd'), 'text/plain', elSrc.value);
+    download(docName(curLang() === 'plantuml' ? 'puml' : 'mmd'), 'text/plain', srcGet());
   });
   $('buml-tab').addEventListener('click', openInTab);
 
@@ -680,6 +800,8 @@
     loadMermaid().catch(function () {
       banner('⚠️ 렌더 엔진(mermaid CDN)을 불러오지 못했습니다. 잠시 뒤 새로고침해 주세요.');
     });
+    /* 편집기는 조용히 로드 — 실패해도 textarea 폴백으로 기능 유지 */
+    loadCm();
 
     seedIfEmpty().then(function (firstId) {
       // 방금 시딩했다면 샘플이 이미 포함돼 있으므로 보충 스킵
