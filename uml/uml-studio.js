@@ -111,7 +111,7 @@
     '#buml-app button,#buml-app input,#buml-app textarea{font:inherit;color:inherit;margin:0;}',
     '#buml-app button{cursor:pointer;background:none;border:none;padding:0;}',
     '#buml-app .buml{border:1px solid var(--bu-line);background:var(--bu-bg);border-radius:6px;overflow:hidden;',
-    '  height:clamp(480px,calc(100vh - 300px),880px);display:flex;flex-direction:column;}',
+    '  height:clamp(560px,calc(100vh - 260px),1080px);display:flex;flex-direction:column;}', /* 세로 스택이라 상한 상향 */
     '#buml-app .buml-top{display:flex;align-items:center;gap:8px;padding:8px 12px;',
     '  background:var(--bu-bar);border-bottom:1px solid var(--bu-line);flex:0 0 auto;}',
     '#buml-app .bu-brand{font-weight:700;font-size:15px;letter-spacing:.02em;white-space:nowrap;}',
@@ -155,8 +155,8 @@
     '#buml-app .bu-viewtabs{display:none;flex:0 0 auto;gap:0;padding:6px 8px;border-bottom:1px solid var(--bu-line);background:#fbfbf9;}',
     '#buml-app .bu-viewtabs button{flex:1;padding:7px 0;font-size:13px;color:var(--bu-dim);}',
     '#buml-app .bu-viewtabs button.on{color:var(--bu-ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--bu-ink);}',
-    '#buml-app .bu-panes{flex:1;display:flex;min-height:0;}',
-    '#buml-app .bu-pane-src{flex:1;display:flex;min-width:0;border-right:1px solid var(--bu-line);}',
+    '#buml-app .bu-panes{flex:1;display:flex;flex-direction:column;min-height:0;}', /* 세로 스택: 코드 위 · 렌더 아래(형 요청, 렌더를 크게) */
+    '#buml-app .bu-pane-src{flex:0 0 40%;display:flex;min-width:0;min-height:0;border-bottom:1px solid var(--bu-line);}',
     '#buml-app .bu-src,#buml-app .bu-pane-src .CodeMirror{flex:1;width:100%;border:none;outline:none;padding:12px;',
     '  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;',
     '  font-size:13px;line-height:1.55;color:var(--bu-text);background:#fff;tab-size:2;}',
@@ -207,7 +207,7 @@
     '  #buml-app .bu-backdrop{display:block;position:absolute;inset:0;background:rgba(0,0,0,.35);z-index:5;opacity:0;pointer-events:none;transition:opacity .18s;}',
     '  #buml-app .buml.side-open .bu-backdrop{opacity:1;pointer-events:auto;}',
     '  #buml-app .bu-viewtabs{display:flex;}',
-    '  #buml-app .bu-pane-src{border-right:none;}',
+    '  #buml-app .bu-pane-src{border-bottom:none;}', /* 모바일은 탭 전환 — 구분선 불필요 */
     '  #buml-app .bu-pane-src,#buml-app .bu-pane-prev{display:none;flex-basis:100%;}',
     '  #buml-app .buml[data-view="src"] .bu-pane-src{display:flex;}',
     '  #buml-app .buml[data-view="prev"] .bu-pane-prev{display:flex;}',
