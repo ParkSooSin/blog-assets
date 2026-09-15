@@ -145,6 +145,9 @@
     '#bmine-app .bm-c.n5{color:#8a6d3b;}#bmine-app .bm-c.n6{color:#4a8382;}',
     '#bmine-app .bm-c.n7{color:#4a4a46;}#bmine-app .bm-c.n8{color:#8a8a80;}',
 
+    '#bmine-app .bm-help{font-size:12px;color:var(--bm-dim);text-align:center;',
+    '  padding:0 10px 10px;}',
+
     /* ---- 결과 배너 ---- */
     '#bmine-app .bm-msg{margin:0 10px 12px;padding:9px 12px;border-radius:4px;font-size:13px;',
     '  display:none;align-items:center;gap:10px;flex-wrap:wrap;}',
@@ -262,6 +265,12 @@
 
     ui.msg = el('div', 'bm-msg');
 
+    // 조작법은 마우스냐 손가락이냐에 따라 아예 다르다 — 해당하는 쪽만 보여준다
+    ui.help = el('div', 'bm-help',
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches
+        ? '왼쪽 클릭으로 열고, 오른쪽 클릭으로 깃발을 꽂습니다. 숫자를 누르면 주변이 한 번에 열립니다.'
+        : '톡 치면 열리고, 꾹 누르면 깃발이 꽂힙니다. 숫자를 누르면 주변이 한 번에 열립니다.');
+
     /* 순위표 */
     var rank = el('div', 'bm-rank');
     var rh = el('div', 'bm-rankhead');
@@ -286,6 +295,7 @@
     root.appendChild(top);
     root.appendChild(hud);
     root.appendChild(ui.boardWrap);
+    root.appendChild(ui.help);
     root.appendChild(ui.msg);
     root.appendChild(rank);
   })();
