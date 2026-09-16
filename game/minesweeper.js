@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var API = 'https://game.soosin.com';
   var GAME = 'minesweeper';
   var LS_NICK = 'bmine-nick';
@@ -137,6 +137,7 @@
     '  box-shadow:inset 1px 1px 0 rgba(255,255,255,.75),inset -1px -1px 0 rgba(0,0,0,.07);}',
     '#bmine-app .bm-c:hover:not(.o){background:var(--bm-cell2);}',
     '#bmine-app .bm-c.o{background:var(--bm-open);box-shadow:none;cursor:default;}',
+    '#bmine-app .bm-c.peek:not(.o){background:#e4eaee;box-shadow:inset 0 0 0 1px #c9d4db;}',
     '#bmine-app .bm-c.boom{background:#e8c9c3;}',
     '#bmine-app .bm-c.wrong{background:#efe2e0;}',
     '#bmine-app .bm-c svg{width:64%;height:64%;display:block;}',
@@ -268,7 +269,7 @@
     // 조작법은 마우스냐 손가락이냐에 따라 아예 다르다 — 해당하는 쪽만 보여준다
     ui.help = el('div', 'bm-help',
       window.matchMedia('(hover: hover) and (pointer: fine)').matches
-        ? '왼쪽 클릭으로 열고, 오른쪽 클릭으로 깃발을 꽂습니다. 숫자를 누르면 주변이 한 번에 열립니다.'
+        ? '왼쪽 클릭으로 열고, 오른쪽 클릭으로 깃발을 꽂습니다. 숫자 위에서 양쪽 버튼을 같이 누르면 주변이 한 번에 열립니다.'
         : '톡 치면 열리고, 꾹 누르면 깃발이 꽂힙니다. 숫자를 누르면 주변이 한 번에 열립니다.');
 
     /* 순위표 */
@@ -614,6 +615,23 @@
   /* ================================================================ 입력 */
 
   var press = { i: -1, timer: null, moved: false, x: 0, y: 0, flagged: false };
+  // 윈도우 지뢰찾기처럼 양쪽 버튼을 같이 누르는 조작(코드, chord)
+  var mouse = { left: false, right: false, i: -1, armed: false, hold: false, peek: [] };
+
+  function peekOn(i) {
+    peekOff();
+    var g = state.grid;
+    if (!g || !g.open[i] || !g.n[i]) return;
+    neighbors(i).forEach(function (j) {
+      if (!g.open[j] && !g.flag[j]) { state.cells[j].classList.add('peek'); mouse.peek.push(j); }
+    });
+  }
+  function peekOff() {
+    mouse.peek.forEach(function (j) {
+      if (state.cells[j]) state.cells[j].classList.remove('peek');
+    });
+    mouse.peek = [];
+  }
 
   function cellIndexFrom(e) {
     var t = e.target;
@@ -651,32 +669,85 @@
     else open(i);
   }
 
-  ui.board.addEventListener('contextmenu', function (e) {
-    e.preventDefault();
+  /* --- 마우스 ---------------------------------------------------------------
+     🚨 마우스는 포인터가 하나라서 **두 번째 버튼을 눌러도 pointerdown 이 오지 않는다**
+        (pointermove 로 온다). 양쪽 버튼을 같이 누르는 조작을 받으려면
+        버튼마다 확실히 오는 mousedown/mouseup 을 써야 한다.                      */
+
+  ui.board.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  ui.board.addEventListener('mousedown', function (e) {
+    if (e.button !== 0 && e.button !== 2) return;
     var i = cellIndexFrom(e);
-    if (i >= 0) act(i, true);
+    if (i < 0) return;
+    e.preventDefault();                       // 글자 선택·기본 메뉴 방지
+    if (e.button === 0) mouse.left = true; else mouse.right = true;
+    mouse.i = i;
+    if (mouse.left && mouse.right) {          // 두 버튼이 같이 눌렸다
+      mouse.armed = true;
+      peekOn(i);
+    }
   });
 
+  ui.board.addEventListener('mousemove', function (e) {
+    if (!mouse.armed) return;
+    var i = cellIndexFrom(e);
+    if (i === mouse.i) return;
+    mouse.i = i;
+    if (i >= 0) peekOn(i); else peekOff();
+  });
+
+  ui.board.addEventListener('mouseup', function (e) {
+    if (e.button !== 0 && e.button !== 2) return;
+    var i = cellIndexFrom(e);
+    if (e.button === 0) mouse.left = false; else mouse.right = false;
+    if (mouse.armed) {
+      mouse.armed = false;
+      mouse.hold = true;                      // 남은 한쪽을 뗄 때 딴짓하지 않게
+      peekOff();
+      // 열린 숫자 위에서만 뜻이 있다 — 닫힌 칸에 깃발이 꽂히면 안 된다
+      if (i >= 0 && i === mouse.i && state.started && state.grid.open[i]) act(i, true);
+      return;
+    }
+    if (mouse.hold) {
+      if (!mouse.left && !mouse.right) mouse.hold = false;
+      return;
+    }
+    if (i < 0 || i !== mouse.i) return;
+    act(i, e.button === 2 ? true : state.flagMode);
+  });
+
+  // 보드 밖에서 버튼을 떼면 mouseup 이 안 온다 — 눌린 상태가 남지 않게 정리한다
+  document.addEventListener('mouseup', function (e) {
+    if (ui.board.contains(e.target)) return;
+    mouse.left = mouse.right = mouse.armed = mouse.hold = false;
+    peekOff();
+  });
+  window.addEventListener('blur', function () {
+    mouse.left = mouse.right = mouse.armed = mouse.hold = false;
+    peekOff();
+  });
+
+  /* --- 손가락·펜 (마우스는 위에서 처리한다) ------------------------------- */
+
   ui.board.addEventListener('pointerdown', function (e) {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;  // 우클릭은 contextmenu 가 처리
+    if (e.pointerType === 'mouse') return;
     var i = cellIndexFrom(e);
     if (i < 0) return;
     press.i = i; press.moved = false; press.flagged = false;
     press.x = e.clientX; press.y = e.clientY;
-    if (e.pointerType !== 'mouse') {
-      // 폰: 꾹 누르면 깃발 (깃발 버튼을 안 켜도 되도록)
-      press.timer = setTimeout(function () {
-        press.timer = null;
-        if (press.moved || press.i !== i) return;
-        press.flagged = true;
-        act(i, true);
-        if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) {} }
-      }, 450);
-    }
+    // 꾹 누르면 깃발 (깃발 버튼을 안 켜도 되도록)
+    press.timer = setTimeout(function () {
+      press.timer = null;
+      if (press.moved || press.i !== i) return;
+      press.flagged = true;
+      act(i, true);
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) {} }
+    }, 450);
   });
 
   ui.board.addEventListener('pointermove', function (e) {
-    if (press.i < 0) return;
+    if (e.pointerType === 'mouse' || press.i < 0) return;
     if (Math.abs(e.clientX - press.x) > 8 || Math.abs(e.clientY - press.y) > 8) {
       press.moved = true;      // 가로 스크롤 중이면 클릭으로 치지 않는다
       clearPress();
@@ -688,6 +759,7 @@
   }
 
   ui.board.addEventListener('pointerup', function (e) {
+    if (e.pointerType === 'mouse') return;
     var i = cellIndexFrom(e);
     clearPress();
     if (press.i < 0 || press.moved || i !== press.i) { press.i = -1; return; }
@@ -696,6 +768,7 @@
   });
 
   ui.board.addEventListener('pointercancel', function () { clearPress(); press.i = -1; });
+
 
   /* ================================================================ 순위 */
 
