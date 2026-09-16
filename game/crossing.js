@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.1';
+  var VERSION = '1.1.0';
   var API = 'https://game.soosin.com';
   var GAME = 'crossing';
   var LEVEL = 'solo';
@@ -160,6 +160,7 @@
     cam: 0,            // 카메라가 보는 맨 아래 줄
     score: 0,
     started: false, over: false, idle: true, armed: false, hop: 0,
+    hitRow: null, hitCarX: null, overT: null,
     t0: 0, finalMs: 0,
     moves: [], raf: null, last: 0,
     sid: null, seed: null, rand: null,
@@ -207,9 +208,13 @@
     ui.go = el('button', 'bx-go', '앞으로');
     ui.right = el('button', 'bx-side', '▶');
     ui.left.type = ui.go.type = ui.right.type = 'button';
-    ui.left.addEventListener('click', function () { move(-1, 0); });
-    ui.right.addEventListener('click', function () { move(1, 0); });
-    ui.go.addEventListener('click', function () { move(0, 1); });
+    function press(btn, dx, dy) {
+      btn.addEventListener('pointerdown', function () { move(dx, dy); });
+      btn.addEventListener('click', function () { move(dx, dy); });
+    }
+    press(ui.left, -1, 0);
+    press(ui.right, 1, 0);
+    press(ui.go, 0, 1);
     ui.pad.appendChild(ui.left);
     ui.pad.appendChild(ui.go);
     ui.pad.appendChild(ui.right);
@@ -336,6 +341,24 @@
   }
 
   var CAR_HUES = ['#8d6e63', '#7a8b99', '#9c8457', '#7f9479', '#a1736b', '#6f7f8f'];
+  var HIT = '#b4695c';   // 부딪힌 자리 표시 (원색 아닌 벽돌빛)
+
+  function drawHit(ctx, cx, cy, s) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = HIT;
+    ctx.lineWidth = Math.max(2, s * 0.055);
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(0, 0, s * 0.46, 0, 7); ctx.stroke();
+    for (var i = 0; i < 8; i++) {
+      var a = i * Math.PI / 4 + Math.PI / 8;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * s * 0.54, Math.sin(a) * s * 0.54);
+      ctx.lineTo(Math.cos(a) * s * 0.70, Math.sin(a) * s * 0.70);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   function draw() {
     var ctx = ui.canvas.getContext('2d');
@@ -365,6 +388,18 @@
         for (var c = 0; c < r.cars.length; c++) {
           var cxp = r.cars[c] * cell;
           drawCar(ctx, cxp, sy + cell * 0.16, cell * 1.5, cell * 0.68, r.dir, hue);
+          // 나를 친 차를 짚어 준다
+          if (state.over && y === state.hitRow && state.hitCarX != null &&
+              Math.abs(r.cars[c] - state.hitCarX) < 0.0001) {
+            ctx.save();
+            ctx.strokeStyle = HIT;
+            ctx.lineWidth = Math.max(2, cell * 0.05);
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(cxp, sy + cell * 0.16, cell * 1.5, cell * 0.68, Math.min(6, cell * 0.19));
+            else ctx.rect(cxp, sy + cell * 0.16, cell * 1.5, cell * 0.68);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       }
     }
@@ -373,19 +408,24 @@
     var bx = (state.fx + 0.5) * cell;
     var by = h - ((state.fy - state.cam) + 0.5) * cell;
     drawBear(ctx, bx, by, cell, state.hop || 0);
+    if (state.over) drawHit(ctx, bx, by, cell);
   }
 
   /* ================================================================ 진행 */
 
-  function carHits(y, col) {
+  // 부딪힌 차의 위치를 돌려준다(없으면 null). 어느 차였는지 화면에 표시해야 하므로.
+  // ⚠️ 차 앞뒤 끝 GRACE 칸은 봐준다 — 스치듯 지나간 걸로 죽으면 억울하다(캐주얼).
+  var GRACE = 0.08;
+  function carAt(y, col) {
     var r = state.rows[y];
-    if (!r || r.type !== 'road') return false;
+    if (!r || r.type !== 'road') return null;
     for (var i = 0; i < r.cars.length; i++) {
-      var a = r.cars[i], b = a + 1.5;            // 차 길이 1.5칸
-      if (col + 0.82 > a && col + 0.18 < b) return true;
+      var a = r.cars[i] + GRACE, b = r.cars[i] + 1.5 - GRACE;   // 차 길이 1.5칸
+      if (col + 0.82 > a && col + 0.18 < b) return r.cars[i];
     }
-    return false;
+    return null;
   }
+  function carHits(y, col) { return carAt(y, col) !== null; }
 
   function move(dx, dy) {
     if (state.over || !state.cell) return;
@@ -435,7 +475,7 @@
     }
 
     // 카곰이 서 있는 줄에서 차에 치였는지
-    if (state.started && !state.over && carHits(state.py, state.px)) gameOver();
+    if (state.started && !state.over && carHits(state.py, state.px)) { gameOver(); return; }
 
     // 🚨 카곰 위치는 절대 보간하지 않는다 — 그림이 판정보다 뒤처지면
     //    "차에 닿지도 않았는데 죽는다". 화면의 부드러움은 카메라가 맡는다
@@ -452,9 +492,17 @@
 
   function gameOver() {
     if (state.over) return;
+    state.hitRow = state.py;
+    state.hitCarX = carAt(state.py, state.px);
     state.over = true;
     state.finalMs = state.started ? (Date.now() - state.t0) : 0;
-    showOver();
+    // 🚨 여기서 화면을 세운다. 안 그러면 차가 계속 달려서
+    //    형이 눈으로 확인할 때쯤엔 이미 지나가 있다(0.7초에 10판 중 6판 실측).
+    draw();
+    if (state.raf) { cancelAnimationFrame(state.raf); state.raf = null; }
+    // 부딪힌 장면을 잠깐 보여 준 뒤에 안내를 덮는다
+    if (state.overT) clearTimeout(state.overT);
+    state.overT = setTimeout(showOver, 420);
     showResult();
   }
 
@@ -490,6 +538,8 @@
     state.started = false; state.over = false; state.submitted = false;
     state.idle = true;
     state.moves = []; state.last = 0; state.finalMs = 0; state.lastMove = 0; state.hop = 0;
+    state.hitRow = null; state.hitCarX = null;
+    if (state.overT) { clearTimeout(state.overT); state.overT = null; }
     ui.score.textContent = '0';
     ui.bestBox.textContent = String(best());
     ui.over.classList.remove('on');
@@ -590,6 +640,7 @@
 
   /* ================================================================ 입력 */
 
+  ui.canvas.addEventListener('pointerdown', function (e) { e.preventDefault(); move(0, 1); });
   ui.canvas.addEventListener('click', function () { move(0, 1); });
 
   document.addEventListener('keydown', function (e) {
