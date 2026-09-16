@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.0.1';
   var API = 'https://game.soosin.com';
   var GAME = 'crossing';
   var LEVEL = 'solo';
@@ -159,7 +159,7 @@
     fy: 0,
     cam: 0,            // 카메라가 보는 맨 아래 줄
     score: 0,
-    started: false, over: false, idle: true, armed: false,
+    started: false, over: false, idle: true, armed: false, hop: 0,
     t0: 0, finalMs: 0,
     moves: [], raf: null, last: 0,
     sid: null, seed: null, rand: null,
@@ -297,10 +297,12 @@
 
   /* ================================================================ 그리기 */
 
-  function drawBear(ctx, cx, cy, s) {
+  function drawBear(ctx, cx, cy, s, hop) {
     // 카곰 얼굴을 아주 단순하게 (작게 나오므로 이 정도면 충분하다)
     ctx.save();
     ctx.translate(cx, cy);
+    // ⚠️ 가로는 건드리지 않는다 — 충돌은 가로 겹침으로 재기 때문에
+    if (hop) ctx.scale(1, 1 + 0.2 * hop);
     var r = s * 0.34;
     ctx.fillStyle = '#b8794e';
     ctx.beginPath(); ctx.arc(-r * 0.78, -r * 0.8, r * 0.42, 0, 7); ctx.fill();
@@ -370,7 +372,7 @@
     // 카곰
     var bx = (state.fx + 0.5) * cell;
     var by = h - ((state.fy - state.cam) + 0.5) * cell;
-    drawBear(ctx, bx, by, cell);
+    drawBear(ctx, bx, by, cell, state.hop || 0);
   }
 
   /* ================================================================ 진행 */
@@ -400,6 +402,8 @@
     if (nx < 0 || nx >= COLS) return;
     if (ny < 0) return;
     state.px = nx; state.py = ny;
+    state.fx = nx; state.fy = ny;   // 그림도 같은 순간에 옮긴다
+    state.hop = 1;
     rowAt(ny);
     if (state.moves.length < 3000) {
       state.moves.push([Math.round(Date.now() - state.t0), dx, dy]);
@@ -433,11 +437,15 @@
     // 카곰이 서 있는 줄에서 차에 치였는지
     if (state.started && !state.over && carHits(state.py, state.px)) gameOver();
 
-    // 화면·카곰 위치를 부드럽게
+    // 🚨 카곰 위치는 절대 보간하지 않는다 — 그림이 판정보다 뒤처지면
+    //    "차에 닿지도 않았는데 죽는다". 화면의 부드러움은 카메라가 맡는다
+    //    (카곰도 줄도 같은 cam 기준이라 둘의 상대 위치는 항상 정확하다).
+    state.fx = state.px;
+    state.fy = state.py;
+    // 점프 느낌은 위치가 아니라 '모양'으로만 준다 — 판정과 어긋날 여지가 없다
+    if (state.hop > 0) state.hop = Math.max(0, state.hop - dt * 1000 / HOP_MS);
     var targetCam = Math.max(0, state.py - HOME_ROW);
-    state.cam += (targetCam - state.cam) * Math.min(1, dt * 9);
-    state.fx += (state.px - state.fx) * Math.min(1, dt * 1000 / HOP_MS);
-    state.fy += (state.py - state.fy) * Math.min(1, dt * 1000 / HOP_MS);
+    state.cam += (targetCam - state.cam) * Math.min(1, dt * 12);
 
     draw();
   }
@@ -481,7 +489,7 @@
     state.score = 0;
     state.started = false; state.over = false; state.submitted = false;
     state.idle = true;
-    state.moves = []; state.last = 0; state.finalMs = 0; state.lastMove = 0;
+    state.moves = []; state.last = 0; state.finalMs = 0; state.lastMove = 0; state.hop = 0;
     ui.score.textContent = '0';
     ui.bestBox.textContent = String(best());
     ui.over.classList.remove('on');
