@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.1.1';
+  var VERSION = '1.1.2';
   var API = 'https://game.soosin.com';
   var GAME = 'minesweeper';
   var LS_NICK = 'bmine-nick';
@@ -674,31 +674,52 @@
         (pointermove 로 온다). 양쪽 버튼을 같이 누르는 조작을 받으려면
         버튼마다 확실히 오는 mousedown/mouseup 을 써야 한다.                      */
 
-  /* 🚨 일부 브라우저·마우스 유틸은 「양쪽 버튼 같이 누르기」를 **뒤로가기 제스처**로 쓴다
-        (Opera·Vivaldi 의 rocker gesture, 마우스 제조사 유틸의 제스처 기능).
-        브라우저가 이벤트를 주기 전에 처리하므로 preventDefault 로는 막을 수 없다.
-        대신 보드에서 버튼을 누르고 있는 동안 **히스토리에 같은 주소를 한 칸 끼워 두면**
-        뒤로가기가 그 칸으로 떨어져 화면이 그대로 남는다(주소가 같아 새로 읽지도 않는다).
-        버튼을 다 떼면 끼운 칸을 조용히 걷어내 히스토리를 원래대로 돌린다. */
-  var guard = { on: false, off: null };
-  function guardOn() {
-    if (guard.off) { clearTimeout(guard.off); guard.off = null; }
-    if (guard.on) return;
-    try { history.pushState({ bmGuard: 1 }, '', location.href); guard.on = true; } catch (e) {}
+  /* 🚨 브라우저 마우스 제스처(Vivaldi·Opera 의 로커 제스처 등)는 양쪽 버튼을 가로챈다.
+        브라우저가 먼저 처리하므로 preventDefault 로 막을 수 없고, 더 나쁜 건
+        **제스처가 끝난 뒤 mouseup 을 안 주는 경우가 있다**는 것이다.
+        그래서 아래 모든 핸들러는 `e.buttons`(지금 실제로 눌린 버튼)로 상태를 다시 맞춘다.
+        이벤트를 놓쳐도 다음 입력에서 스스로 복구된다 —
+        플래그를 믿고 있으면 한 번 어긋난 뒤로 조작이 통째로 먹통이 된다. */
+
+  function resetMouse() {
+    mouse.left = mouse.right = mouse.armed = mouse.hold = false;
+    peekOff();
+    guardRelease();
   }
-  function guardOff() {
-    if (guard.off) clearTimeout(guard.off);
-    // 제스처가 버튼을 뗀 뒤에 들어오는 경우도 있어 잠깐 더 세워 둔다
-    guard.off = setTimeout(function () {
-      guard.off = null;
-      if (!guard.on) return;
-      guard.on = false;
-      try { if (history.state && history.state.bmGuard) history.back(); } catch (e) {}
-    }, 350);
+  // e.buttons 비트: 1=왼쪽, 2=오른쪽
+  function syncButtons(e) {
+    mouse.left = !!(e.buttons & 1);
+    mouse.right = !!(e.buttons & 2);
+    return !mouse.left && !mouse.right;      // 다 뗐는가
+  }
+
+  /* --- 뒤로가기 제스처 흡수 -------------------------------------------------
+     버튼을 누르고 있는 동안 히스토리에 같은 주소를 한 칸 끼워 둔다.
+     제스처가 뒤로가기를 해도 그 칸으로 떨어져 화면이 그대로 남는다.
+     ⚠️ 타이머로 미루면 늦게 실행된 back() 이 엉뚱한 시점에 터진다 — 즉시 걷어낸다. */
+  var guard = { pushed: false, warned: false };
+  function guardArm() {
+    if (guard.pushed) return;
+    try { history.pushState({ bmGuard: 1 }, '', location.href); guard.pushed = true; } catch (e) {}
+  }
+  function guardRelease() {
+    if (!guard.pushed) return;
+    guard.pushed = false;
+    try {
+      if (history.state && history.state.bmGuard) history.back();
+    } catch (e) {}
   }
   window.addEventListener('popstate', function () {
-    if (!guard.on) return;          // 가드가 서 있는 동안 들어온 뒤로가기 = 제스처
-    try { history.pushState({ bmGuard: 1 }, '', location.href); } catch (e) {}
+    if (!mouse.left && !mouse.right) { guard.pushed = false; return; }  // 평소 뒤로가기는 그냥 보낸다
+    // 버튼을 누르고 있는 중에 들어온 뒤로가기 = 브라우저 제스처
+    guard.pushed = false;
+    guardArm();
+    if (!guard.warned) {
+      guard.warned = true;
+      showMsg('lose', '브라우저의 마우스 제스처가 양쪽 버튼을 가로채고 있습니다. ' +
+        'Vivaldi·Opera 라면 설정 → 마우스에서 「로커 제스처」를 꺼 주세요. ' +
+        '그때까지는 열린 숫자를 왼쪽 클릭해도 주변이 한 번에 열립니다.');
+    }
   });
 
   ui.board.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -708,10 +729,11 @@
     var i = cellIndexFrom(e);
     if (i < 0) return;
     e.preventDefault();                       // 글자 선택·기본 메뉴 방지
-    guardOn();                                // ⚠️ 첫 버튼부터 세운다 — 제스처는 두 번째 버튼에서 터진다
-    if (e.button === 0) mouse.left = true; else mouse.right = true;
+    mouse.hold = false;                       // 새 누름 = 앞 조작은 끝났다(놓친 mouseup 복구)
+    syncButtons(e);                           // e.buttons 에 이번 버튼이 이미 포함돼 있다
     mouse.i = i;
-    if (mouse.left && mouse.right) {          // 두 버튼이 같이 눌렸다
+    guardArm();                               // ⚠️ 첫 버튼부터 — 제스처는 두 번째 버튼에서 터진다
+    if (mouse.left && mouse.right) {
       mouse.armed = true;
       peekOn(i);
     }
@@ -719,6 +741,11 @@
 
   ui.board.addEventListener('mousemove', function (e) {
     if (!mouse.armed) return;
+    if (!(e.buttons & 1) || !(e.buttons & 2)) {   // 어느새 한쪽이 떨어졌다(mouseup 유실)
+      mouse.armed = false; peekOff();
+      syncButtons(e);
+      return;
+    }
     var i = cellIndexFrom(e);
     if (i === mouse.i) return;
     mouse.i = i;
@@ -728,35 +755,40 @@
   ui.board.addEventListener('mouseup', function (e) {
     if (e.button !== 0 && e.button !== 2) return;
     var i = cellIndexFrom(e);
-    if (e.button === 0) mouse.left = false; else mouse.right = false;
-    if (mouse.armed) {
+    var wasArmed = mouse.armed;
+    var allUp = syncButtons(e);               // 뗀 뒤의 실제 상태
+    if (wasArmed) {
       mouse.armed = false;
-      mouse.hold = true;                      // 남은 한쪽을 뗄 때 딴짓하지 않게
       peekOff();
       // 열린 숫자 위에서만 뜻이 있다 — 닫힌 칸에 깃발이 꽂히면 안 된다
       if (i >= 0 && i === mouse.i && state.started && state.grid.open[i]) act(i, true);
-      if (!mouse.left && !mouse.right) guardOff();
+      mouse.hold = !allUp;                    // ⚠️ 남은 버튼이 정말 있을 때만 건다
+      if (allUp) guardRelease();
       return;
     }
-    if (!mouse.left && !mouse.right) guardOff();
     if (mouse.hold) {
-      if (!mouse.left && !mouse.right) mouse.hold = false;
+      if (allUp) { mouse.hold = false; guardRelease(); }
       return;
     }
+    if (allUp) guardRelease();
     if (i < 0 || i !== mouse.i) return;
     act(i, e.button === 2 ? true : state.flagMode);
   });
 
-  // 보드 밖에서 버튼을 떼면 mouseup 이 안 온다 — 눌린 상태가 남지 않게 정리한다
+  // 최후 안전망 — 버튼을 아무것도 안 누른 채 마우스가 움직이면 남은 상태를 씻어낸다.
+  // 제스처가 mouseup 을 삼켜도 마우스만 움직이면 바로 복구된다.
+  document.addEventListener('mousemove', function (e) {
+    if (e.buttons !== 0) return;
+    if (!mouse.left && !mouse.right && !mouse.armed && !mouse.hold && !guard.pushed) return;
+    resetMouse();
+  }, { passive: true });
+
   document.addEventListener('mouseup', function (e) {
     if (ui.board.contains(e.target)) return;
-    mouse.left = mouse.right = mouse.armed = mouse.hold = false;
-    peekOff(); guardOff();
+    resetMouse();
   });
-  window.addEventListener('blur', function () {
-    mouse.left = mouse.right = mouse.armed = mouse.hold = false;
-    peekOff(); guardOff();
-  });
+  window.addEventListener('blur', resetMouse);
+
 
   /* --- 손가락·펜 (마우스는 위에서 처리한다) ------------------------------- */
 
