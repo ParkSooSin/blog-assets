@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.1.1';
   var API = 'https://game.soosin.com';
   var GAME = 'minesweeper';
   var LS_NICK = 'bmine-nick';
@@ -674,6 +674,33 @@
         (pointermove 로 온다). 양쪽 버튼을 같이 누르는 조작을 받으려면
         버튼마다 확실히 오는 mousedown/mouseup 을 써야 한다.                      */
 
+  /* 🚨 일부 브라우저·마우스 유틸은 「양쪽 버튼 같이 누르기」를 **뒤로가기 제스처**로 쓴다
+        (Opera·Vivaldi 의 rocker gesture, 마우스 제조사 유틸의 제스처 기능).
+        브라우저가 이벤트를 주기 전에 처리하므로 preventDefault 로는 막을 수 없다.
+        대신 보드에서 버튼을 누르고 있는 동안 **히스토리에 같은 주소를 한 칸 끼워 두면**
+        뒤로가기가 그 칸으로 떨어져 화면이 그대로 남는다(주소가 같아 새로 읽지도 않는다).
+        버튼을 다 떼면 끼운 칸을 조용히 걷어내 히스토리를 원래대로 돌린다. */
+  var guard = { on: false, off: null };
+  function guardOn() {
+    if (guard.off) { clearTimeout(guard.off); guard.off = null; }
+    if (guard.on) return;
+    try { history.pushState({ bmGuard: 1 }, '', location.href); guard.on = true; } catch (e) {}
+  }
+  function guardOff() {
+    if (guard.off) clearTimeout(guard.off);
+    // 제스처가 버튼을 뗀 뒤에 들어오는 경우도 있어 잠깐 더 세워 둔다
+    guard.off = setTimeout(function () {
+      guard.off = null;
+      if (!guard.on) return;
+      guard.on = false;
+      try { if (history.state && history.state.bmGuard) history.back(); } catch (e) {}
+    }, 350);
+  }
+  window.addEventListener('popstate', function () {
+    if (!guard.on) return;          // 가드가 서 있는 동안 들어온 뒤로가기 = 제스처
+    try { history.pushState({ bmGuard: 1 }, '', location.href); } catch (e) {}
+  });
+
   ui.board.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   ui.board.addEventListener('mousedown', function (e) {
@@ -681,6 +708,7 @@
     var i = cellIndexFrom(e);
     if (i < 0) return;
     e.preventDefault();                       // 글자 선택·기본 메뉴 방지
+    guardOn();                                // ⚠️ 첫 버튼부터 세운다 — 제스처는 두 번째 버튼에서 터진다
     if (e.button === 0) mouse.left = true; else mouse.right = true;
     mouse.i = i;
     if (mouse.left && mouse.right) {          // 두 버튼이 같이 눌렸다
@@ -707,8 +735,10 @@
       peekOff();
       // 열린 숫자 위에서만 뜻이 있다 — 닫힌 칸에 깃발이 꽂히면 안 된다
       if (i >= 0 && i === mouse.i && state.started && state.grid.open[i]) act(i, true);
+      if (!mouse.left && !mouse.right) guardOff();
       return;
     }
+    if (!mouse.left && !mouse.right) guardOff();
     if (mouse.hold) {
       if (!mouse.left && !mouse.right) mouse.hold = false;
       return;
@@ -721,11 +751,11 @@
   document.addEventListener('mouseup', function (e) {
     if (ui.board.contains(e.target)) return;
     mouse.left = mouse.right = mouse.armed = mouse.hold = false;
-    peekOff();
+    peekOff(); guardOff();
   });
   window.addEventListener('blur', function () {
     mouse.left = mouse.right = mouse.armed = mouse.hold = false;
-    peekOff();
+    peekOff(); guardOff();
   });
 
   /* --- 손가락·펜 (마우스는 위에서 처리한다) ------------------------------- */
